@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+    <title>一直往下划</title>
+    <style>
+      html, body {
+        margin: 0; height: 100%;
+        overflow: hidden;                 
+        -webkit-user-select: none; user-select: none;
+        background: #fff;
+        font-family: system-ui,-apple-system,Segoe UI,Roboto,PingFang SC,Helvetica,Arial,sans-serif;
+      }
+
+      #input-container{
+        position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+        background: #fff;
+        padding: calc(8px + env(safe-area-inset-top)) 16px 8px 16px;
+        border-bottom: 1px solid #eee;
+        display: flex; gap: 8px; align-items: center;
+      }
+      #text-input{ flex: 1; font-size:16px; padding:8px 10px; }
+      #submit-btn{ font-size:16px; padding:8px 28px; }
+
+      #scan-btn{
+        position: fixed; left: 0; right: 0; z-index: 999;
+        color: #fff;
+        top: calc(var(--barH, 64px));
+        padding: 10px 16px;
+        background: #000;
+        border: 0; border-bottom: 2px solid #eee;
+        font-size: 20px;
+        text-align: center;
+      }
+
+      #swipe-hint{
+        position: fixed; left: 0; right: 0; z-index: 998;
+        top: calc(var(--barH, 64px) + var(--scanH, 46px));
+        padding: 8px 16px;
+        background: #fff;
+        text-align: center;
+        font-size: 16px;
+        color: #444;
+      }
+
+      #viewport{
+        position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+        overflow: hidden;                     
+        padding-top: calc(var(--barH, 64px) + var(--scanH, 46px) + var(--noteH, 36px));
+        background: #fff;
+      }
+      #rail{
+        position: absolute; top: 0; left: 0; right: 0;
+        will-change: transform;
+      }
+
+      #text-container{
+        padding: 250px 20px 180px;             
+        font-size: 20px; line-height: 1.7;
+      }
+
+      video#cam{ position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;}
+      canvas#camCanvas{
+        position:fixed; inset:0; display:none; z-index:9999;
+        width:100vw; height:100vh;
+      }
+
+      .scanHint{
+        position: fixed; left: 50%; bottom: 8vh; transform: translateX(-50%);
+        background: rgba(0,0,0,.55); color: #fff; padding: 8px 12px; border-radius: 999px;
+        font-size: 15px; z-index: 10000; display:none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="input-container">
+      <input type="text" id="text-input" placeholder="扫码时你在想什么…">
+      <button id="submit-btn">和我一起写</button>
+    </div>
+
+    <button id="scan-btn">继续扫码</button>
+
+    <p id="swipe-hint">（在空白页面向下划手机屏幕）
+      <br><br>若你也有添加你写的文字、或轻触屏幕修改段落，可截屏留念 <br>（此处不储存文字痕迹）
+
+    </p>
+
+    <div id="viewport">
+      <div id="rail">
+        <div id="text-container"></div>
+      </div>
+    </div>
+
+    <video id="cam" playsinline muted></video>
+    <canvas id="camCanvas"></canvas>
+    <div id="scan-hint" class="scanHint">对准二维码…</div>
+
+    <script>
+    window.addEventListener("DOMContentLoaded", function () {
+      const textContainer = document.getElementById("text-container");
+      const inputContainer = document.getElementById("input-container");
+      const textInput = document.getElementById("text-input");
+      const submitBtn = document.getElementById("submit-btn");
+      const viewport = document.getElementById("viewport");
+      const rail = document.getElementById("rail");
+
+      const cam = document.getElementById("cam");
+      const camCanvas = document.getElementById("camCanvas");
+      const ctx = camCanvas.getContext("2d");
+      const scanBtn = document.getElementById("scan-btn");
+      const scanHint = document.getElementById("scan-hint");
+      const swipeHint = document.getElementById("swipe-hint");
+
+      function setHeights(){
+        const barH = Math.ceil(inputContainer.getBoundingClientRect().height);
+        document.documentElement.style.setProperty('--barH', barH + 'px');
+
+        const scanH = Math.ceil(scanBtn.getBoundingClientRect().height);
+        document.documentElement.style.setProperty('--scanH', scanH + 'px');
+
+        const noteH = Math.ceil(swipeHint.getBoundingClientRect().height);
+        document.documentElement.style.setProperty('--noteH', noteH + 'px');
+      }
+      setHeights();
+      window.addEventListener('resize', setHeights);
+
+      const text = `这是让我们一直写下去的页面，你不断往下划。我继续写，你继续划。我继续写，你继续划。你好，世界！
+你从哪里来？你是怎么到这里来的？你怎么经过手机维修店的？你从哪条街来？你经过了什么？你上街做了什么？你要修手机吗？你看到了什么？你今天看到了什么？今天你看到了什么？
+今天你扫码了吗？你扫码了吗？扫码了吗。
+
+小时候玩过家家经常扮演超市收银员的角色。那大概是我第一次感受到“权力”的手感：手握扫码枪，举起手臂、转动腕骨，瞄准另一块积木上的虚拟条码，
+“哔”————识别的声音，是机器确认我存在的声音。扫取了信息，留下痕迹。伸出手的“扫”让公共与私人之间交换。
+那一刻，身体比意识更早获得了“扫”与“检视”的能力。信息被读取，数据被写入，世界在哔声中被交换。
+如今城市里不少大小超市的收银员都被自助收银机器取代，这倒刚好圆了我儿时的梦，每一次自主扫描都让我欣喜地练习扫描、确认规范。
+于是我们逐渐认识“授权”、“拥有”、“标注”、“打卡”。或是在更多机器眼、摄像头面前经过扫过。我们伸出手、举起手机，主动出示二维码。
+
+手机必须修好。武器必须准备好。
+
+QR二维码从1994年日本的汽车流水线开始使用，为了更快速方便读取、追踪、管理信息。QR二维码的年龄跟我一样大。
+日常中的我们似乎也成了工厂流水线上检视员，每扫一次即是与周围机器硬件的每一次握手：确认信息、获取信任、留下数据。
+扫码的手势从工厂延伸到门禁闸口、摊位交易、展览空间、边境口岸；街道旁、餐桌上、核酸亭前、医院病床前……
+带着相似的屈腕、同样的抬臂和呼吸。
+
+你刚刚又扫了几个码？你举起手臂、盯住屏幕、等待系统响应，时间暂停，你必须走进机器的时间里，被暂时吸入二维网格中，延迟行动。
+
+手握扫码抢。
+手握手机。手握摄像头。从扫到拍。
+打开手机摄像头，瞄准，触发系统程序，跳转链接。
+
+手握手机，用手机摄像头观看，扫代替看，扫码代替握手。
+但是坏掉的摄像头也能拍摄吗？坏掉的摄像头也可以扫描吗？
+坏了也未必想起来修。我们已经忘记如何维修、维系，还是仅仅在维持？原厂的还是替补训练的？
+你准备或没有准备好，总也得进去。
+手机带我们走近每一个本地，生成与本地设施的每一次交换：识别、定位、上传……
+又或是你被吸引去买了一个新的机器，又能拍了，又能扫了。
+
+扫！拍！截屏。截屏。拍！
+
+扫码，是一种无声的签名，也是一种写作。
+我们在划动与扫描之间不断书写——用手指、用屏幕、用眼神。每一次划动都是延续的笔划，每一次扫描都是新的换行。
+你不断往下划，我继续写；你划过扫过的手指与我的书写的代码重叠。
+划动是一种阅读，也是一种同步：你阅读的同时，我在生成；你扫过的同时，我在记录。
+你看似在阅读，其实也在被写；看似在控制，其实也在被控制。
+
+“你扫码了吗？”是日常问候。也是“在吗？”、“你还在系统里吗？”
+扫码也是“签名”；扫码也是“明白”；扫码也是让机器相信。
+
+继续握紧手中的机器！继续扫！拍！`;
+
+      const words = Array.from(text);
+
+      const triggerPhrases = [
+        "扫码了吗","我们伸出手、举起手机，主动出示二维码。","带着相似的屈腕、同样的抬臂和呼吸。",
+        "手握扫码抢。","打开手机摄像头，瞄准，触发系统程序，跳转链接。","又能拍了，又能扫了。",
+        "截屏。拍！","其实也在被控制。","继续扫！拍！"
+      ];
+      const fired = new Set();
+      const maxTriggerLen = triggerPhrases.reduce((m,s)=>Math.max(m, s.length), 0);
+      let recent = "";
+      let index = 0;
+
+      let offset = 0;
+
+      function visibleHeight(){
+        const hBar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--barH')) || inputContainer.getBoundingClientRect().height;
+        const hScan = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--scanH')) || scanBtn.getBoundingClientRect().height;
+        const hNote = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--noteH')) || swipeHint.getBoundingClientRect().height;
+        return window.innerHeight - hBar - hScan - hNote;
+      }
+      function syncToBottom(){
+        const visH = visibleHeight();
+        const railH = rail.scrollHeight;
+        const neededOffset = Math.max(0, railH - visH);
+        if (neededOffset !== offset){
+          offset = neededOffset;
+          rail.style.transform = `translateY(${-offset}px)`;
+        }
+      }
+
+      function appendChar(ch){
+        const span = document.createElement("span");
+        span.textContent = ch + " ";
+        span.addEventListener("click", function(){ this.style.display = "none"; });
+        textContainer.appendChild(span);
+        recent += ch;
+        if (recent.length > maxTriggerLen) recent = recent.slice(-maxTriggerLen);
+      }
+      function revealN(n){
+        for (let i=0; i<n; i++) {
+          if (index >= words.length) break;
+          appendChar(words[index++]);
+        }
+        checkTriggers();
+        syncToBottom();
+      }
+      function checkTriggers(){
+        for (const phrase of triggerPhrases){
+          if (!fired.has(phrase) && recent.includes(phrase)){
+            fired.add(phrase);
+            startCameraForThreeSeconds();
+            break;
+          }
+        }
+      }
+
+      // texts show as swiping
+      const PX_PER_CHAR_TOUCH = 28;
+      const PX_PER_CHAR_WHEEL = 60;
+
+      let touchStartY = 0, touchStartX = 0, accumulatedTouchPx = 0;
+      const SWIPE_X_TOLERANCE = 80;
+
+      function isInsideInput(el){ return inputContainer.contains(el); }
+
+      document.addEventListener("touchstart", (e)=>{
+        if (e.touches.length!==1) return;
+        if (isInsideInput(e.target)) return;
+        const t = e.touches[0];
+        touchStartY = t.clientY; touchStartX = t.clientX; accumulatedTouchPx = 0;
+      }, {passive:true});
+
+      document.addEventListener("touchmove", (e)=>{
+        if (e.touches.length!==1) return;
+        if (isInsideInput(e.target)) return;
+
+        const t = e.touches[0];
+        const dy = touchStartY - t.clientY; 
+        const dx = Math.abs(t.clientX - touchStartX);
+        if (dx > SWIPE_X_TOLERANCE) return;
+
+        const newPx = dy - accumulatedTouchPx;
+        if (newPx <= 0) return;
+
+        const chars = Math.floor(newPx / PX_PER_CHAR_TOUCH);
+        if (chars > 0) {
+          revealN(chars);
+          accumulatedTouchPx += chars * PX_PER_CHAR_TOUCH;
+        }
+      }, {passive:true});
+
+      document.addEventListener("touchend", ()=>{ accumulatedTouchPx = 0; }, {passive:true});
+
+      let wheelAccum = 0;
+      document.addEventListener("wheel", (e)=>{
+        if (isInsideInput(e.target)) return;
+        const upUnits = -e.deltaY;
+        wheelAccum += upUnits;
+        const chars = Math.floor(Math.abs(wheelAccum) / PX_PER_CHAR_WHEEL);
+        if (chars > 0){
+          if (wheelAccum > 0) revealN(chars);
+          wheelAccum = wheelAccum > 0
+            ? wheelAccum - chars * PX_PER_CHAR_WHEEL
+            : wheelAccum + chars * PX_PER_CHAR_WHEEL;
+        }
+      }, {passive:true});
+
+      // “扫” blinkers
+      function resizeCamCanvas(){
+        camCanvas.width = Math.floor(window.innerWidth * devicePixelRatio);
+        camCanvas.height = Math.floor(window.innerHeight * devicePixelRatio);
+        ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      }
+      resizeCamCanvas();
+      window.addEventListener('resize', ()=>{ setHeights(); resizeCamCanvas(); syncToBottom(); });
+
+      let streamRef = null, rafId = null, cameraActive = false, qrScanActive = false;
+
+      async function startCameraForThreeSeconds(){
+        if (cameraActive || qrScanActive) return;
+        cameraActive = true;
+        camCanvas.style.display = "block";
+        try{
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+          streamRef = stream; cam.srcObject = stream;
+          await cam.play().catch(()=>{});
+          const start = performance.now();
+          const draw = (now)=>{
+            drawVideoCover(); drawOverlayScan("扫");
+            if (now - start < 3000){ rafId = requestAnimationFrame(draw); }
+            else { stopCamera(); }
+          };
+          rafId = requestAnimationFrame(draw);
+        } catch(err){
+          console.warn("getUserMedia failed:", err);
+          stopCamera();
+        }
+      }
+      function drawVideoCover(){
+        const cw = camCanvas.width / devicePixelRatio;
+        const ch = camCanvas.height / devicePixelRatio;
+        const vw = cam.videoWidth || cw;
+        const vh = cam.videoHeight || ch;
+        const scale = Math.max(cw / vw, ch / vh);
+        const dw = vw * scale, dh = vh * scale;
+        const dx = (cw - dw) / 2, dy = (ch - dh) / 2;
+        const c = camCanvas.getContext('2d');
+        c.clearRect(0,0,cw,ch);
+        if (vw && vh) c.drawImage(cam, dx, dy, dw, dh);
+      }
+      function drawOverlayScan(text){
+        const c = camCanvas.getContext('2d');
+        const cw = camCanvas.width / devicePixelRatio;
+        const ch = camCanvas.height / devicePixelRatio;
+        c.save();
+        c.fillStyle = "rgba(0,0,0,0.35)";
+        c.fillRect(0,0,cw,ch);
+        c.textAlign = "center";
+        c.textBaseline = "middle";
+        c.font = Math.round(Math.min(cw, ch) * 0.18) + "px sans-serif";
+        c.fillStyle = "#fff";
+        c.shadowColor = "rgba(0,0,0,0.5)";
+        c.shadowBlur = 12;
+        c.fillText(text, cw/2, ch/2);
+        c.restore();
+      }
+      function stopCamera(){
+        if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+        if (streamRef){
+          streamRef.getTracks().forEach(t=>t.stop());
+          cam.pause(); cam.srcObject = null; streamRef = null;
+        }
+        camCanvas.style.display = "none";
+        cameraActive = false;
+        qrScanActive = false;
+        scanHint.style.display = "none";
+      }
+
+      submitBtn.addEventListener("click", ()=>{
+        const userText = textInput.value.trim();
+        if (!userText) return;
+        userText.split(/\s+/).forEach(word=>{
+          const w=document.createElement("span");
+          w.textContent = word + " ";
+          textContainer.appendChild(w);
+          recent += word;
+          if (recent.length > maxTriggerLen) recent = recent.slice(-maxTriggerLen);
+        });
+        checkTriggers();
+        textInput.value = "";
+        syncToBottom();
+      });
+
+      document.getElementById('scan-btn').addEventListener('click', startQrScan);
+
+      async function startQrScan(){
+        if (qrScanActive || cameraActive) return;
+        if (!('BarcodeDetector' in window)) {
+          alert('此浏览器暂不支持内置二维码识别（BarcodeDetector）。请使用最新版 Chrome/Edge/Android 浏览器，或在 iOS 17+ 的 Safari 中尝试。');
+          return;
+        }
+        try {
+          qrScanActive = true;
+          camCanvas.style.display = "block";
+          scanHint.style.display = "block";
+          scanHint.textContent = "对准二维码…";
+
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+          streamRef = stream; cam.srcObject = stream;
+          await cam.play().catch(()=>{});
+
+          const detector = new BarcodeDetector({ formats: ['qr_code'] });
+
+          const tick = async ()=>{
+            if (!qrScanActive) return;
+            drawVideoCover(); drawOverlayScan("扫码中");
+            try {
+              // Prefer detecting directly on the <video> for better compatibility
+              const barcodes = await detector.detect(cam);
+              if (barcodes && barcodes.length) {
+                const value = (barcodes[0].rawValue || '').trim();
+                if (value) {
+                  stopCamera();
+                  const url = normalizeToUrl(value);
+                  if (url) window.location.href = url;
+                  else alert('扫描结果：' + value);
+                  return;
+                }
+              }
+            } catch(e) {
+              // fallback: try canvas if video detect fails
+              try {
+                const b2 = await detector.detect(camCanvas);
+                if (b2 && b2.length) {
+                  const value = (b2[0].rawValue || '').trim();
+                  if (value) {
+                    stopCamera();
+                    const url = normalizeToUrl(value);
+                    if (url) window.location.href = url;
+                    else alert('扫描结果：' + value);
+                    return;
+                  }
+                }
+              } catch(_) {}
+            }
+            rafId = requestAnimationFrame(tick);
+          };
+          rafId = requestAnimationFrame(tick);
+
+          // Safety timeout (auto-stop after 20s)
+          setTimeout(()=>{ if (qrScanActive){ alert('未检测到二维码'); stopCamera(); } }, 20000);
+
+        } catch (err) {
+          console.warn('QR scan failed:', err);
+          alert('无法打开摄像头：' + (err.message || err));
+          stopCamera();
+        }
+      }
+
+      function normalizeToUrl(value){
+        try { return new URL(value).href; }
+        catch(_){
+          if (/^[\w.-]+\.[a-z]{2,}([/:?].*)?$/i.test(value)) return 'http://' + value;
+          return null;
+        }
+      }
+    });
+    </script>
+  </body>
+</html>
