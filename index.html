@@ -6,21 +6,22 @@
   <title>一直往下划</title>
   <style>
     :root{
-      /* First-paint fallbacks so content won't sit under fixed bars */
-      --barH: 64px;   
-      --scanH: 46px;  
-      --noteH: 36px;  
+      --barH: 64px;    /* first paint fallback */
+      --scanH: 46px;
+      --noteH: 36px;
     }
 
     html, body {
-      margin: 0; height: 100%;
-      overflow: hidden; /* manual scroll via transformed rail */
+      margin: 0;
+      height: 100%;
+      height: -webkit-fill-available; /* iOS Safari stability */
+      overflow: hidden;
       -webkit-user-select: none; user-select: none;
       background: #fff;
       font-family: system-ui,-apple-system,Segoe UI,Roboto,PingFang SC,Helvetica,Arial,sans-serif;
     }
 
-    /* 顶部固定输入栏 */
+    /* Top input bar */
     #input-container{
       position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
       background: #fff;
@@ -31,7 +32,7 @@
     #text-input{ flex: 1; font-size:16px; padding:8px 10px; }
     #submit-btn{ font-size:16px; padding:8px 28px; }
 
-    /* 顶部下面的“继续扫码”固定按钮 */
+    /* Scan button just under bar */
     #scan-btn{
       position: fixed; left: 0; right: 0; z-index: 999;
       top: calc(var(--barH, 64px));
@@ -41,7 +42,7 @@
       font-size: 20px; text-align: center;
     }
 
-    /* “向下划手机”提示（固定在扫码按钮下面） */
+    /* Swipe hint under scan button */
     #swipe-hint{
       position: fixed; left: 0; right: 0; z-index: 998;
       top: calc(var(--barH, 64px) + var(--scanH, 46px));
@@ -50,81 +51,66 @@
       text-align: center;
       font-size: 16px; color: #444;
       border-bottom: 1px dashed #e5e5e5;
+      pointer-events: none;          /* << never block touches */
+      -webkit-user-select: none; user-select: none;
     }
 
-    /* 我们自己管理的“视口” 和 “轨道” */
+    /* Virtual viewport for our own scroll */
     #viewport{
       position: absolute; inset: 0;
-      overflow: hidden; /* 禁用原生滚动 */
-      /* 预留 顶栏+按钮+提示 的空间 */
+      overflow: hidden;
+      /* CSS calc for first paint */
       padding-top: calc(var(--barH, 64px) + var(--scanH, 46px) + var(--noteH, 36px));
       background: #fff;
     }
     #rail{
       position: absolute; top: 0; left: 0; right: 0;
       will-change: transform;
+      transform: translate3d(0,0,0); /* compositor hint */
     }
 
-    /* 文本容器（按需保留你的留白） */
     #text-container{
-      margin-top: 250px;              /* ✅ 按你的要求保留 */
-      padding: 16px 20px 180px;       /* 底部留白 */
+      margin-top: 250px;                 /* keep this as requested */
+      padding: 16px 20px calc(180px + env(safe-area-inset-bottom));
       font-size: 20px; line-height: 1.7;
     }
 
-    /* 摄像头画布覆盖层 */
     video#cam{ position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;}
     canvas#camCanvas{
       position:fixed; inset:0; display:none; z-index:9999;
       width:100vw; height:100vh;
     }
 
-    /* 扫码提示气泡 */
     .scanHint{
       position: fixed; left: 50%; bottom: 8vh; transform: translateX(-50%);
       background: rgba(0,0,0,.55); color: #fff;
       padding: 8px 12px; border-radius: 999px;
       font-size: 15px; z-index: 10000; display:none;
-    }
-
-    /* 可选：便携调试面板（需要时切换 display） */
-    #debug{
-      position: fixed; right: 8px; bottom: 8px; z-index: 10001;
-      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-      background: rgba(0,0,0,.6); color:#fff; padding:8px 10px; border-radius:8px;
-      display:none;
+      pointer-events: none;
     }
   </style>
 </head>
 <body>
-  <!-- 顶部输入栏 -->
   <div id="input-container">
     <input type="text" id="text-input" placeholder="扫码时你在想什么…">
     <button id="submit-btn">和我一起写</button>
   </div>
 
-  <!-- 固定“继续扫码”按钮 -->
   <button id="scan-btn">继续扫码</button>
 
-  <!-- 固定提示 -->
   <p id="swipe-hint">（在空白页面向上划手机屏幕）
     <br><br>若你也有添加你写的文字、或轻触屏幕修改段落，可截屏留念 <br>（此处不储存文字痕迹）
   </p>
 
-  <!-- 手动滚动区域 -->
   <div id="viewport">
     <div id="rail">
       <div id="text-container"></div>
     </div>
   </div>
 
-  <!-- 摄像头元素 -->
   <video id="cam" playsinline muted></video>
   <canvas id="camCanvas"></canvas>
   <div id="scan-hint" class="scanHint">对准二维码…</div>
-
-  <!-- 调试（可开） -->
-  <div id="debug"></div>
 
   <script>
   window.addEventListener("DOMContentLoaded", function () {
@@ -138,15 +124,10 @@
     const cam = document.getElementById("cam");
     const camCanvas = document.getElementById("camCanvas");
     const ctx = camCanvas.getContext("2d");
-
     const scanBtn = document.getElementById("scan-btn");
     const scanHint = document.getElementById("scan-hint");
     const swipeHint = document.getElementById("swipe-hint");
 
-    const debugBox = document.getElementById('debug');
-    const SAFARI = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-
-    // ============== 文本内容 & 触发短语 ==============
     const text = `这是让我们一直写下去的页面，你不断往下划。我继续写，你继续划。我继续写，你继续划。你好，世界！
 你从哪里来？你是怎么到这里来的？你怎么经过手机维修店的？你从哪条街来？你经过了什么？你上街做了什么？你要修手机吗？你看到了什么？你今天看到了什么？今天你看到了什么？
 今天你扫码了吗？你扫码了吗？扫码了吗。
@@ -191,6 +172,7 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
 继续握紧手中的机器！继续扫！拍！`;
 
     const words = Array.from(text);
+
     const triggerPhrases = [
       "扫码了吗","我们伸出手、举起手机，主动出示二维码。","带着相似的屈腕、同样的抬臂和呼吸。",
       "手握扫码抢。","打开手机摄像头，瞄准，触发系统程序，跳转链接。","又能拍了，又能扫了。",
@@ -200,20 +182,29 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
     const maxTriggerLen = triggerPhrases.reduce((m,s)=>Math.max(m, s.length), 0);
     let recent = "", index = 0;
 
-    // ============== 视口高度/保留空间测量（兼容 iOS Safari） ==============
-    function vpHeight(){
-      return window.visualViewport ? Math.floor(window.visualViewport.height)
-                                   : window.innerHeight;
+    /* ---------- layout-viewport height (not visualViewport) ---------- */
+    function layoutVH(){
+      return document.documentElement.clientHeight || window.innerHeight || 0;
+    }
+    function measureHeights(){
+      const barH  = Math.ceil(inputContainer.getBoundingClientRect().height);
+      const scanH = Math.ceil(scanBtn.getBoundingClientRect().height);
+      const noteH = Math.ceil(swipeHint.getBoundingClientRect().height);
+      document.documentElement.style.setProperty('--barH',  barH  + 'px');
+      document.documentElement.style.setProperty('--scanH', scanH + 'px');
+      document.documentElement.style.setProperty('--noteH', noteH + 'px');
+
+      // Explicit px fallback for Safari calc() weirdness
+      const topPad = barH + scanH + noteH;
+      document.getElementById('viewport').style.paddingTop = topPad + 'px';
     }
     function visibleHeight(){
-      const cs   = getComputedStyle(document.documentElement);
-      const hBar = parseFloat(cs.getPropertyValue('--barH'))  || inputContainer.getBoundingClientRect().height;
-      const hScan= parseFloat(cs.getPropertyValue('--scanH')) || scanBtn.getBoundingClientRect().height;
-      const hNote= parseFloat(cs.getPropertyValue('--noteH')) || swipeHint.getBoundingClientRect().height;
-      return vpHeight() - hBar - hScan - hNote;
+      const barH  = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--barH'))  || inputContainer.getBoundingClientRect().height;
+      const scanH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--scanH')) || scanBtn.getBoundingClientRect().height;
+      const noteH = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--noteH')) || swipeHint.getBoundingClientRect().height;
+      return layoutVH() - barH - scanH - noteH;
     }
 
-    // 把最新文字保持在底部可见
     let offset = 0;
     function syncToBottom(){
       const visH = visibleHeight();
@@ -221,48 +212,11 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
       const neededOffset = Math.max(0, railH - visH);
       if (neededOffset !== offset){
         offset = neededOffset;
-        rail.style.transform = `translateY(${-offset}px)`;
+        rail.style.transform = `translate3d(0,${-offset}px,0)`;
       }
-      // debugBox.style.display = 'block';
-      debugBox.innerText =
-        `vvh=${vpHeight()}  bar=${getComputedStyle(document.documentElement).getPropertyValue('--barH')}  scan=${getComputedStyle(document.documentElement).getPropertyValue('--scanH')}  note=${getComputedStyle(document.documentElement).getPropertyValue('--noteH')}\n`+
-        `railH=${railH} visH=${visH} offset=${offset}`;
     }
 
-    // 高度设置（防止首次布局压住内容）
-    const setHeights = (() => {
-      let raf = null;
-      return function(){
-        if (raf) cancelAnimationFrame(raf);
-        raf = requestAnimationFrame(() => {
-          const barH  = Math.ceil(inputContainer.getBoundingClientRect().height);
-          const scanH = Math.ceil(scanBtn.getBoundingClientRect().height);
-          const noteH = Math.ceil(swipeHint.getBoundingClientRect().height);
-          document.documentElement.style.setProperty('--barH',  barH  + 'px');
-          document.documentElement.style.setProperty('--scanH', scanH + 'px');
-          document.documentElement.style.setProperty('--noteH', noteH + 'px');
-          syncToBottom();
-          raf = null;
-        });
-      };
-    })();
-
-    setHeights();
-    window.addEventListener('load', setHeights);
-    window.addEventListener('resize', setHeights);
-    window.addEventListener('orientationchange', setHeights);
-    if (window.visualViewport){
-      visualViewport.addEventListener('resize', setHeights);
-      visualViewport.addEventListener('scroll', setHeights);
-    }
-    if (document.fonts && document.fonts.ready){
-      document.fonts.ready.then(setHeights).catch(()=>{});
-    }
-    new ResizeObserver(setHeights).observe(inputContainer);
-    new ResizeObserver(setHeights).observe(scanBtn);
-    new ResizeObserver(setHeights).observe(swipeHint);
-
-    // ============== 追加文字 & 触发摄像头闪现 ==============
+    /* ---------- append & triggers ---------- */
     function appendChar(ch){
       const span = document.createElement("span");
       span.textContent = ch + " ";
@@ -270,6 +224,14 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
       textContainer.appendChild(span);
       recent += ch;
       if (recent.length > maxTriggerLen) recent = recent.slice(-maxTriggerLen);
+    }
+    function revealN(n){
+      for (let i=0; i<n; i++){
+        if (index >= words.length) break;
+        appendChar(words[index++]);
+      }
+      checkTriggers();
+      syncToBottom();
     }
     function checkTriggers(){
       for (const phrase of triggerPhrases){
@@ -281,39 +243,9 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
       }
     }
 
-    // —— 首次 reveal 后强制修正（iOS Safari 迟滞绘制固定栏）——
-    let firstRevealDone = false;
-    function forceLayoutFix(){
-      const barH  = Math.ceil(inputContainer.getBoundingClientRect().height);
-      const scanH = Math.ceil(scanBtn.getBoundingClientRect().height);
-      const noteH = Math.ceil(swipeHint.getBoundingClientRect().height);
-      document.documentElement.style.setProperty('--barH',  barH  + 'px');
-      document.documentElement.style.setProperty('--scanH', scanH + 'px');
-      document.documentElement.style.setProperty('--noteH', noteH + 'px');
-      syncToBottom();
-    }
-
-    const _revealN_core = function(n){
-      for (let i=0; i<n; i++) {
-        if (index >= words.length) break;
-        appendChar(words[index++]);
-      }
-      checkTriggers();
-      syncToBottom();
-    };
-
-    function revealN(n){
-      _revealN_core(n);
-      if (!firstRevealDone){
-        firstRevealDone = true;
-        if (SAFARI) setTimeout(forceLayoutFix, 20); // 让 Safari 完成第一次绘制后再纠偏
-      }
-    }
-
-    // ============== 交互：上滑/滚轮按距离显示文字 ==============
+    /* ---------- swipe & wheel pacing (UP reveals) ---------- */
     const PX_PER_CHAR_TOUCH = 28;
     const PX_PER_CHAR_WHEEL = 60;
-
     let touchStartY = 0, touchStartX = 0, accumulatedTouchPx = 0;
     const SWIPE_X_TOLERANCE = 80;
 
@@ -336,7 +268,7 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
       const newPx = dy - accumulatedTouchPx;
       if (newPx <= 0) return;
       const chars = Math.floor(newPx / PX_PER_CHAR_TOUCH);
-      if (chars > 0) {
+      if (chars > 0){
         revealN(chars);
         accumulatedTouchPx += chars * PX_PER_CHAR_TOUCH;
       }
@@ -344,14 +276,6 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
 
     document.addEventListener("touchend", ()=>{ accumulatedTouchPx = 0; }, {passive:true});
 
-    // 触发可视视口变化时也纠偏（Safari 地址栏伸缩）
-    if (window.visualViewport){
-      visualViewport.addEventListener('resize', forceLayoutFix);
-      visualViewport.addEventListener('scroll', forceLayoutFix);
-    }
-    window.addEventListener('orientationchange', forceLayoutFix);
-
-    // 触控板/鼠标滚轮：上滚显示
     let wheelAccum = 0;
     document.addEventListener("wheel", (e)=>{
       if (isInsideInput(e.target)) return;
@@ -366,14 +290,13 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
       }
     }, {passive:true});
 
-    // ============== 摄像头 3 秒“扫”覆盖层 ==============
+    /* ---------- camera 3s “扫” overlay ---------- */
     function resizeCamCanvas(){
       camCanvas.width  = Math.floor(window.innerWidth * devicePixelRatio);
       camCanvas.height = Math.floor(window.innerHeight * devicePixelRatio);
       ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
     }
     resizeCamCanvas();
-    window.addEventListener('resize', ()=>{ setHeights(); resizeCamCanvas(); syncToBottom(); });
 
     let streamRef = null, rafId = null, cameraActive = false, qrScanActive = false;
 
@@ -437,7 +360,7 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
       scanHint.style.display = "none";
     }
 
-    // ============== 提交自定义文本（并保持底部可见） ==============
+    /* ---------- submit adds words & keeps bottom visible ---------- */
     submitBtn.addEventListener("click", ()=>{
       const userText = textInput.value.trim();
       if (!userText) return;
@@ -453,7 +376,7 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
       syncToBottom();
     });
 
-    // ============== “继续扫码”按钮：相机 + BarcodeDetector ==============
+    /* ---------- QR scan button (kept from your version) ---------- */
     document.getElementById('scan-btn').addEventListener('click', startQrScan);
 
     async function startQrScan(){
@@ -478,7 +401,7 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
           if (!qrScanActive) return;
           drawVideoCover(); drawOverlayScan("扫码中");
           try {
-            const barcodes = await detector.detect(cam); // 直接在 <video> 上检测
+            const barcodes = await detector.detect(cam);
             if (barcodes && barcodes.length) {
               const value = (barcodes[0].rawValue || '').trim();
               if (value) {
@@ -490,7 +413,6 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
               }
             }
           } catch(e) {
-            // 备选：在画布上再试一次
             try {
               const b2 = await detector.detect(camCanvas);
               if (b2 && b2.length) {
@@ -509,7 +431,6 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
         };
         rafId = requestAnimationFrame(tick);
 
-        // 安全超时（20s 自动停止）
         setTimeout(()=>{ if (qrScanActive){ alert('未检测到二维码'); stopCamera(); } }, 20000);
 
       } catch (err) {
@@ -527,12 +448,24 @@ QR二维码从1994年日本的汽车流水线开始使用，为了更快速方�
       }
     }
 
-    // Safari layout nudge — no characters shown
-    setTimeout(() => {
-      window.dispatchEvent(new Event('resize'));
-    }, 50);
+    /* ---------- measure & sync on load & changes ---------- */
+    function reflowAll(){
+      measureHeights();
+      syncToBottom();
+    }
+    reflowAll();
 
+    window.addEventListener('load', reflowAll, {once:true});
+    window.addEventListener('resize', reflowAll);
+    window.addEventListener('orientationchange', reflowAll);
+    if (document.fonts && document.fonts.ready){
+      document.fonts.ready.then(reflowAll).catch(()=>{});
+    }
+    new ResizeObserver(reflowAll).observe(inputContainer);
+    new ResizeObserver(reflowAll).observe(scanBtn);
+    new ResizeObserver(reflowAll).observe(swipeHint);
 
+    // No automatic reveal; first char appears only after swipe.
   });
   </script>
 </body>
